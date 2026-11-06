@@ -44,6 +44,13 @@ jobs:
           path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
 
+      # 固定签名自检:CI 每次是新机器,签名证书必须来自仓库,指纹不符直接失败
+      - name: Verify APK signature is stable
+        run: |
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort -V | tail -1)
+          $APKSIGNER verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | tee /tmp/certs.txt
+          grep -qi "00dc1224dc45800c192740fe77bb8bdaf8024aaba5c49576fd0703b311b06e05" /tmp/certs.txt
+
       - name: Unit tests
         working-directory: android
         run: |

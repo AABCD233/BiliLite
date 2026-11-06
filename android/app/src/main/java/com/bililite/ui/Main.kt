@@ -147,12 +147,7 @@ private fun BiliAppContent() {
         }
         onDispose { }
     }
-    // 开屏动画
-    var showSplash by remember { mutableStateOf(true) }
-    if (showSplash) {
-        SplashScreen { showSplash = false }
-        return
-    }
+    // v0.6.0: 去掉开屏动画(原 JUST DO IT 开屏被移除),启动直接进登录/主界面
     // v0.4.19: 已去除首次进入的"使用须知"弹窗(用户要求),直接进入登录/主界面
     val loginVm: LoginViewModel = viewModel(factory = LoginVMFactory(ctx))
     var loggedIn by remember { mutableStateOf(LoginSession.isLoggedIn(ctx)) }
@@ -401,33 +396,6 @@ private fun TosDialog(onAgree: () -> Unit, onDisagree: () -> Unit) {
                     }
                 }
             }
-        }
-    }
-}
-
-/** 开屏动画:显示品牌图并淡出 */
-@Composable
-fun SplashScreen(onDone: () -> Unit) {
-    val ctx = LocalContext.current
-    var alpha by remember { mutableStateOf(0f) }
-    val bmp: ImageBitmap? = remember {
-        try {
-            val d = BitmapFactory.decodeResource(ctx.resources, R.drawable.splash)
-            d?.asImageBitmap()
-        } catch (_: Exception) { null }
-    }
-    LaunchedEffect(Unit) {
-        alpha = 1f
-        delay(1500)          // 停留 1.5s
-        alpha = 0f           // 淡出 0.3s
-        delay(300)
-        onDone()
-    }
-    Box(Modifier.fillMaxSize().background(Color.White), contentAlignment = Alignment.Center) {
-        if (bmp != null) {
-            Image(bitmap = bmp, contentDescription = "开屏",
-                contentScale = ContentScale.Fit,
-                modifier = Modifier.fillMaxSize().graphicsLayer { this.alpha = alpha })
         }
     }
 }

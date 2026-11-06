@@ -1686,6 +1686,36 @@ fun ProfileScreen(vm: BiliViewModel, onLoggedOut: () -> Unit = {},
             })
         }
 
+        // v0.6.0: 开源声明——二改自 BiliLite,界面/交互借鉴 PiliPlus
+        Card(colors = CardDefaults.cardColors(containerColor = BILICARD),
+            modifier = Modifier.fillMaxWidth().padding(top = 4.dp)) {
+            Column(Modifier.fillMaxWidth().padding(12.dp)) {
+                Text("开源声明", color = C.t2, fontSize = 12.sp)
+                Spacer(Modifier.height(6.dp))
+                Text("本应用基于 HYXTPSP/BiliLite 二次修改，部分界面与交互借鉴自 PiliPlus（GPL-3.0）。",
+                    color = C.t2, fontSize = 11.sp, lineHeight = 16.sp)
+                Spacer(Modifier.height(4.dp))
+                Text("PiliPlus：github.com/bggRGjQaUbCoE/PiliPlus",
+                    color = C.primary, fontSize = 11.sp,
+                    modifier = Modifier.clickable {
+                        try {
+                            ctx.startActivity(android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://github.com/bggRGjQaUbCoE/PiliPlus")))
+                        } catch (_: Exception) {}
+                    })
+                Text("原项目：github.com/HYXTPSP/BiliLite",
+                    color = C.primary, fontSize = 11.sp,
+                    modifier = Modifier.clickable {
+                        try {
+                            ctx.startActivity(android.content.Intent(
+                                android.content.Intent.ACTION_VIEW,
+                                android.net.Uri.parse("https://github.com/HYXTPSP/BiliLite")))
+                        } catch (_: Exception) {}
+                    })
+            }
+        }
+
         // 底部占满,QQ 群号贴最下方(还原为单一群号,16sp 加粗)
         Spacer(Modifier.weight(1f))
         Text("QQ交流群：811598424", color = C.t1, fontSize = 16.sp,
