@@ -1734,6 +1734,8 @@ fun ProfileScreen(vm: BiliViewModel, onLoggedOut: () -> Unit = {},
                 BiliTheme.toggle(ctx)
             }, false),
             Triple("插件", { showPlugins = true }, false),
+            // v0.6.0: 数据备份/日志页之前没有入口(showSync 从未被置 true),补上
+            Triple("数据备份", { showSync = true }, false),
             Triple("账号管理", { showAccount = true }, false)))
 
         // v0.4.20 插件系统:渲染插件通过 ui.registerMenu 注册的自定义入口

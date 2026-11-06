@@ -4,11 +4,20 @@
 
 BiliLite 是一款用极简风格设计的,专注于学习的学习版 B 站,从根源上屏蔽娱乐内容。
 
-当前版本: v0.5.0 (versionCode 18)
+当前版本: v0.6.0 (versionCode 19)
 
 ## 下载
 
 - 最新 APK: [GitHub Releases](https://github.com/HYXTPSP/BiliLite/releases)
+
+## v0.6.0 更新
+
+- **UP 空间页**：首页新增 UP 入口，点视频卡上的 UP 名或顶部「UP」即可进入；含资料区、粉丝/关注/获赞、主页 / 动态 / 投稿 / 收藏 四个 tab
+- **播放器**：控制条按 PiliPlus 风格重做——顶部渐变标题栏、时间/进度同行、播放中 3 秒自动隐藏、双击左右快进快退 10 秒
+- **固定签名**：仓库自带证书，CI 校验指纹，侧载升级不再报签名不一致
+- **移除开屏 JUST DO IT**，启动直接进入登录/主界面
+- **「我的」页底部新增开源声明**：二改自 BiliLite，部分界面与交互借鉴 PiliPlus（GPL-3.0）
+- 补上「数据备份/日志」入口（此前无入口，功能不可达）
 
 ## 功能特性
 
@@ -107,9 +116,15 @@ export ANDROID_HOME=/opt/android-sdk
 
 完整插件开发规范见 [插件开发规范.md](插件开发规范.md)
 
+## 声明
+
+本项目基于 [HYXTPSP/BiliLite](https://github.com/HYXTPSP/BiliLite) 二次修改；
+UP 空间页与播放器控制条的界面/交互参考了 [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus)（GPL-3.0）。
+本项目仅重新实现了 Kotlin/Compose 代码，未直接复制 PiliPlus 的 Dart 源码。
+
 ## 许可证
 
-本项目基于 [MIT License](LICENSE) 开源。
+本项目基于 [MIT License](LICENSE) 开源（上游同为 MIT）。
 
 ## 免责声明
 

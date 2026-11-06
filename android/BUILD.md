@@ -1,4 +1,4 @@
-# BiliLite v0.4.4 源码构建说明
+# BiliLite v0.6.0 源码构建说明
 
 ## 环境要求
 
@@ -30,8 +30,8 @@ echo "sdk.dir=/你的/Android/Sdk/路径" > local.properties
 
 ## 版本
 
-- versionCode = 8
-- versionName = 0.4.4
+- versionCode = 19
+- versionName = 0.6.0
 - applicationId = `com.bililite.app`
 
 ## 关键源码位置
