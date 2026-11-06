@@ -1,10 +1,14 @@
 package com.bililite.ui
 
 import android.app.Activity
+import android.content.ContentValues
 import android.content.Context
+import android.graphics.Bitmap
 import android.content.pm.ActivityInfo
 import android.media.AudioManager
 import android.os.Build
+import android.os.Environment
+import android.provider.MediaStore
 import android.view.TextureView
 import android.view.WindowInsets
 import android.view.WindowInsetsController
@@ -15,6 +19,8 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.gestures.detectVerticalDragGestures
@@ -35,6 +41,7 @@ import androidx.compose.material.icons.filled.Pause
 import androidx.compose.material.icons.filled.Bookmark
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Fullscreen
+import androidx.compose.material.icons.filled.PhotoCamera
 import androidx.compose.material.icons.filled.BrightnessHigh
 import androidx.compose.material.icons.filled.VolumeUp
 import androidx.compose.material.icons.filled.ZoomOutMap
@@ -52,10 +59,15 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.window.Dialog
+import java.io.File
+import java.io.FileOutputStream
+import java.util.Locale
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.media3.common.MediaItem
@@ -667,14 +679,18 @@ private fun Player(
     var currentSubtitle by remember { mutableStateOf("") }
     // v0.4.13: 上次合法播放位置(毫秒),currentPosition 异常时沿用,避免字幕乱跳
     var lastSubPos by remember { mutableStateOf(0L) }
-    // v0.4.9: 字幕字号/位置可调(持久化)。subSize: 0小 1中 2大;subPos: 0底 1中 2上
-    var subSize by remember {
-        mutableStateOf(ctx.getSharedPreferences("bililite_pref", Context.MODE_PRIVATE).getInt("sub_size", 1))
-    }
-    var subPos by remember {
-        mutableStateOf(ctx.getSharedPreferences("bililite_pref", Context.MODE_PRIVATE).getInt("sub_pos", 0))
-    }
+    // v0.6.0: 字幕设置(PiliPlus 同款:字号/全屏字号/描边/边距/背景不透明度),持久化
+    val pref = ctx.getSharedPreferences("bililite_pref", Context.MODE_PRIVATE)
+    var subFontScale by remember { mutableStateOf(pref.getFloat("sub_scale", 1.0f)) }
+    var subFontScaleFs by remember { mutableStateOf(pref.getFloat("sub_scale_fs", 1.5f)) }
+    var subStroke by remember { mutableStateOf(pref.getFloat("sub_stroke", 2.0f)) }
+    var subPadH by remember { mutableStateOf(pref.getFloat("sub_pad_h", 24f)) }
+    var subPadB by remember { mutableStateOf(pref.getFloat("sub_pad_b", 24f)) }
+    var subBgAlpha by remember { mutableStateOf(pref.getFloat("sub_bg_alpha", 0.67f)) }
     var showSubMenu by remember { mutableStateOf(false) }
+    // 截图提示(顶部小胶囊,2 秒后消失)
+    var shotMsg by remember { mutableStateOf("") }
+    fun saveSubFloat(key: String, v: Float) { pref.edit().putFloat(key, v).apply() }
     // AspectRatioFrameLayout 引用（用于按视频宽高比设置，避免拉伸）
     val arflRef = remember { mutableStateOf<androidx.media3.ui.AspectRatioFrameLayout?>(null) }
 
@@ -981,6 +997,17 @@ private fun Player(
     fun togglePlay() { if (isPlaying) exo.pause() else exo.play() }
     fun doBookmark() { onAddBookmark(exo.currentPosition); showControls = false }
 
+    // v0.6.0: 截图——抓 TextureView 当前帧,保存到相册(API29+)或应用图片目录
+    fun takeShot() {
+        val tv = arflRef.value?.getChildAt(0) as? TextureView
+        val bmp = try { tv?.bitmap } catch (_: Exception) { null }
+        shotMsg = if (bmp == null) "截图失败:画面还没准备好"
+                  else {
+                      val p = saveScreenshot(ctx, bmp)
+                      if (p != null) "已保存: $p" else "截图保存失败"
+                  }
+    }
+
     // v0.4.4: 全屏屏幕锁定——锁定时固定横屏方向,防止播放中误旋转
     fun toggleScreenLock() {
         screenLocked = !screenLocked
@@ -1092,30 +1119,24 @@ private fun Player(
                 },
                 modifier = Modifier.fillMaxSize()
             )
-            // v0.4.4: 字幕显示层——手动渲染,底部白字黑边
-            // v0.4.9: 字号三档 + 位置(底/中/上)可调
+            // v0.6.0: 字幕显示层——字号/描边/边距/背景不透明度全部可调(PiliPlus 风格)
             if (subtitleOn && hasSubtitle && currentSubtitle.isNotEmpty()) {
-                // v0.4.20: 平板字幕放大 3 倍,手机保持原大小(按设备区分)
                 val isTabletDevice = ctx.resources.configuration.smallestScreenWidthDp >= 600
-                val subScale = if (isTabletDevice) 3 else 1
-                val subFontSize = when (subSize) {
-                    0 -> (13 * subScale).sp
-                    2 -> (19 * subScale).sp
-                    else -> (15 * subScale).sp
-                }
-                val subAlign = when (subPos) { 1 -> Alignment.Center; 2 -> Alignment.TopCenter; else -> Alignment.BottomCenter }
-                val subPadding = when (subPos) { 1 -> 48.dp; 2 -> 36.dp; else -> 12.dp }
-                Box(
-                    Modifier.fillMaxWidth().align(subAlign)
-                        .padding(horizontal = 16.dp, vertical = subPadding),
-                    contentAlignment = Alignment.Center
-                ) {
+                val fsScale = if (fullscreen) subFontScaleFs else subFontScale
+                val subFontSize = (15f * fsScale * (if (isTabletDevice) 2f else 1f)).sp
+                Box(Modifier.fillMaxSize(), contentAlignment = Alignment.BottomCenter) {
                     Text(
                         currentSubtitle,
                         color = Color.White,
                         fontSize = subFontSize,
+                        textAlign = TextAlign.Center,
+                        style = androidx.compose.ui.text.TextStyle(
+                            shadow = androidx.compose.ui.graphics.Shadow(
+                                color = Color.Black, offset = Offset.Zero,
+                                blurRadius = subStroke * 3f)),
                         modifier = Modifier
-                            .background(Color(0x99000000), RoundedCornerShape(6.dp))
+                            .padding(start = subPadH.dp, end = subPadH.dp, bottom = subPadB.dp)
+                            .background(Color.Black.copy(alpha = subBgAlpha), RoundedCornerShape(6.dp))
                             .padding(horizontal = 10.dp, vertical = 4.dp)
                     )
                 }
@@ -1371,6 +1392,10 @@ private fun Player(
                             Icon(Icons.Filled.BookmarkBorder, contentDescription = "标记",
                                 tint = Color.White, modifier = Modifier.size(22.dp))
                         }
+                        IconButton(onClick = { takeShot() }) {
+                            Icon(Icons.Filled.PhotoCamera, contentDescription = "截图",
+                                tint = Color.White, modifier = Modifier.size(20.dp))
+                        }
                         // 倍速按钮（点击弹菜单）
                         Box {
                             TextButton(onClick = { showSpeedMenu = true }) {
@@ -1411,33 +1436,12 @@ private fun Player(
                                 }
                             }
                         }
-                        // v0.4.1: 字幕按钮(有字幕轨道时显示)。v0.4.9: 弹出菜单含开关/字号/位置（仅全屏显示）
-                        if (fullscreen && hasSubtitle) {
-                            Box {
-                                TextButton(onClick = { showSubMenu = true }) {
-                                    Text(if (subtitleOn) "字幕" else "字幕关",
-                                        color = if (subtitleOn) Color.White else Color(0x80FFFFFF),
-                                        fontSize = 12.sp)
-                                }
-                                DropdownMenu(expanded = showSubMenu, onDismissRequest = { showSubMenu = false }) {
-                                    DropdownMenuItem(
-                                        text = { Text(if (subtitleOn) "关闭字幕" else "开启字幕", color = C.t3) },
-                                        onClick = { subtitleOn = !subtitleOn })
-                                    DropdownMenuItem(
-                                        text = { Text("字号: ${listOf("小", "中", "大")[subSize]}", color = C.t3) },
-                                        onClick = {
-                                            subSize = (subSize + 1) % 3
-                                            ctx.getSharedPreferences("bililite_pref", Context.MODE_PRIVATE).edit()
-                                                .putInt("sub_size", subSize).apply()
-                                        })
-                                    DropdownMenuItem(
-                                        text = { Text("位置: ${listOf("底部", "中部", "顶部")[subPos]}", color = C.t3) },
-                                        onClick = {
-                                            subPos = (subPos + 1) % 3
-                                            ctx.getSharedPreferences("bililite_pref", Context.MODE_PRIVATE).edit()
-                                                .putInt("sub_pos", subPos).apply()
-                                        })
-                                }
+                        // v0.6.0: 字幕设置(PiliPlus 同款滑杆面板),有字幕轨道时显示
+                        if (hasSubtitle) {
+                            TextButton(onClick = { showSubMenu = true }) {
+                                Text(if (subtitleOn) "字幕" else "字幕关",
+                                    color = if (subtitleOn) Color.White else Color(0x80FFFFFF),
+                                    fontSize = 12.sp)
                             }
                         }
                         // v0.4.1: 离线缓存按钮(v0.4.3: 显示缓存中/已缓存状态;v0.4.19 点弹清晰度选择)
@@ -1476,6 +1480,30 @@ private fun Player(
                     }
                 }
             }
+        }
+
+        // v0.6.0: 截图结果提示
+        if (shotMsg.isNotEmpty()) {
+            LaunchedEffect(shotMsg) { delay(2000); shotMsg = "" }
+            Surface(color = Color(0xCC000000), shape = RoundedCornerShape(16.dp),
+                modifier = Modifier.align(Alignment.TopCenter).padding(top = 56.dp)) {
+                Text(shotMsg, color = Color.White, fontSize = 12.sp,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+            }
+        }
+
+        // v0.6.0: 字幕设置面板(PiliPlus 同款滑杆)
+        if (showSubMenu) {
+            SubtitleSettingsDialog(
+                onDismiss = { showSubMenu = false },
+                enabled = subtitleOn, onEnabled = { subtitleOn = it },
+                fontScale = subFontScale, onFontScale = { subFontScale = it; saveSubFloat("sub_scale", it) },
+                fontScaleFs = subFontScaleFs, onFontScaleFs = { subFontScaleFs = it; saveSubFloat("sub_scale_fs", it) },
+                stroke = subStroke, onStroke = { subStroke = it; saveSubFloat("sub_stroke", it) },
+                padH = subPadH, onPadH = { subPadH = it; saveSubFloat("sub_pad_h", it) },
+                padB = subPadB, onPadB = { subPadB = it; saveSubFloat("sub_pad_b", it) },
+                bgAlpha = subBgAlpha, onBgAlpha = { subBgAlpha = it; saveSubFloat("sub_bg_alpha", it) }
+            )
         }
 
         // v0.4.3: 缓存状态/进度提示(顶部小胶囊,缓存完成后自动消失)
@@ -1619,4 +1647,89 @@ private fun SlimProgressBar(
             .size(dotSize)
             .background(Color.White, CircleShape))
     }
+}
+
+// v0.6.0: 字幕设置面板(对应 PiliPlus 的"字幕设置":字号/全屏字号/描边/边距/背景不透明度)
+@Composable
+private fun SubtitleSettingsDialog(
+    onDismiss: () -> Unit,
+    enabled: Boolean, onEnabled: (Boolean) -> Unit,
+    fontScale: Float, onFontScale: (Float) -> Unit,
+    fontScaleFs: Float, onFontScaleFs: (Float) -> Unit,
+    stroke: Float, onStroke: (Float) -> Unit,
+    padH: Float, onPadH: (Float) -> Unit,
+    padB: Float, onPadB: (Float) -> Unit,
+    bgAlpha: Float, onBgAlpha: (Float) -> Unit
+) {
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(shape = RoundedCornerShape(16.dp), color = C.card) {
+            Column(Modifier.fillMaxWidth().heightIn(max = 560.dp)
+                .verticalScroll(rememberScrollState()).padding(16.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("字幕设置", color = C.t1, fontSize = 16.sp,
+                        fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+                    TextButton(onClick = onDismiss) { Text("完成", color = C.t1) }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Text("显示字幕", color = C.t2, fontSize = 13.sp, modifier = Modifier.weight(1f))
+                    Switch(checked = enabled, onCheckedChange = onEnabled)
+                }
+                SubSettingSlider("字体大小", "${(fontScale * 100).toInt()}%", fontScale, 0.5f, 2.5f, onFontScale)
+                SubSettingSlider("全屏字体大小", "${(fontScaleFs * 100).toInt()}%", fontScaleFs, 0.5f, 2.5f, onFontScaleFs)
+                SubSettingSlider("描边粗细", String.format(Locale.US, "%.1f", stroke), stroke, 0f, 5f, onStroke)
+                SubSettingSlider("左右边距", "${padH.toInt()}dp", padH, 0f, 100f, onPadH)
+                SubSettingSlider("底部边距", "${padB.toInt()}dp", padB, 0f, 200f, onPadB)
+                SubSettingSlider("背景不透明度", "${(bgAlpha * 100).toInt()}%", bgAlpha, 0f, 1f, onBgAlpha)
+                Spacer(Modifier.height(8.dp))
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubSettingSlider(
+    label: String, valueText: String, value: Float,
+    min: Float, max: Float, onChange: (Float) -> Unit
+) {
+    Column(Modifier.fillMaxWidth().padding(top = 10.dp)) {
+        Row(Modifier.fillMaxWidth()) {
+            Text(label, color = C.t2, fontSize = 12.sp, modifier = Modifier.weight(1f))
+            Text(valueText, color = C.t1, fontSize = 12.sp)
+        }
+        Slider(
+            value = value, onValueChange = onChange, valueRange = min..max,
+            colors = SliderDefaults.colors(
+                thumbColor = C.block, activeTrackColor = C.block, inactiveTrackColor = C.line)
+        )
+    }
+}
+
+/** v0.6.0: 保存截图。API29+ 走 MediaStore 相册(Pictures/BiliLite),更低版本存应用图片目录。 */
+private fun saveScreenshot(ctx: Context, bmp: Bitmap): String? {
+    val name = "BiliLite_${System.currentTimeMillis()}.png"
+    return try {
+        if (Build.VERSION.SDK_INT >= 29) {
+            val values = ContentValues().apply {
+                put(MediaStore.Images.Media.DISPLAY_NAME, name)
+                put(MediaStore.Images.Media.MIME_TYPE, "image/png")
+                put(MediaStore.Images.Media.RELATIVE_PATH, "Pictures/BiliLite")
+                put(MediaStore.Images.Media.IS_PENDING, 1)
+            }
+            val uri = ctx.contentResolver.insert(MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values)
+                ?: return null
+            ctx.contentResolver.openOutputStream(uri)?.use {
+                bmp.compress(Bitmap.CompressFormat.PNG, 100, it)
+            }
+            values.clear()
+            values.put(MediaStore.Images.Media.IS_PENDING, 0)
+            ctx.contentResolver.update(uri, values, null, null)
+            "相册 Pictures/BiliLite/$name"
+        } else {
+            val dir = File(ctx.getExternalFilesDir(Environment.DIRECTORY_PICTURES), "BiliLite")
+                .apply { mkdirs() }
+            val f = File(dir, name)
+            FileOutputStream(f).use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
+            f.absolutePath
+        }
+    } catch (_: Exception) { null }
 }
