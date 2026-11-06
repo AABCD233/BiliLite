@@ -1,0 +1,59 @@
+name: Release APK
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+
+      - name: Build signed APK
+        working-directory: android
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
+
+      - name: Verify signature
+        run: |
+          APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort -V | tail -1)
+          $APKSIGNER verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | tee /tmp/certs.txt
+          grep -qi "00dc1224dc45800c192740fe77bb8bdaf8024aaba5c49576fd0703b311b06e05" /tmp/certs.txt
+
+      - name: Rename APK
+        run: cp android/app/build/outputs/apk/debug/app-debug.apk "BiliLite-${{ github.ref_name }}.apk"
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: BiliLite ${{ github.ref_name }}
+          body: |
+            学习专注型 B 站客户端（二改版）· 基于 HYXTPSP/BiliLite，界面/交互借鉴 PiliPlus。
+
+            **本次更新**
+            - 播放器：PiliPlus 风格控制条（顶部渐变标题栏、时间/进度同行、播放中 3 秒自动隐藏、双击左右快进/快退 10 秒）
+            - 新增 UP 空间页：首页「UP」入口 + 视频卡 UP 名可点，含 主页 / 动态 / 投稿 / 收藏
+            - 移除开屏 JUST DO IT
+            - 「我的」页底部新增开源声明
+            - 固定签名，覆盖安装不再签名冲突；补上「数据备份/日志」入口
+
+            **安装说明**
+            本包使用新的固定签名证书，若装过上游 v0.5.0 或更早版本，请先卸载一次再安装。
+          files: BiliLite-${{ github.ref_name }}.apk
+          fail_on_unmatched_files: true
