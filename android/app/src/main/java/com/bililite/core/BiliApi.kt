@@ -619,4 +619,55 @@ class BiliApi(private val ctx: Context) {
             try { conn.disconnect() } catch (_: Exception) {}
             resp
         }
+
+    // ---------- UP 空间(v0.6.0) ----------
+    // 说明:老 /x/space/acc/info 现在直接 -401,必须走 wbi 版;其余接口都按
+    // 「wbi 优先 + 非 wbi 兜底」处理,失败时由调用方显示空态,不崩主界面。
+    /** 空间资料卡(name/face/sign/level)。 */
+    suspend fun spaceInfo(mid: Long): JSONObject =
+        wbiGet("https://api.bilibili.com/x/space/wbi/acc/info",
+            mapOf("mid" to mid.toString()), space = true)
+
+    /** 粉丝/关注数(免登录可用)。 */
+    suspend fun relationStat(mid: Long): JSONObject =
+        get("https://api.bilibili.com/x/relation/stat?vmid=$mid", space = true)
+
+    /** 获赞/播放总量(返回可能为空对象,调用方要容错)。 */
+    suspend fun spaceUpStat(mid: Long): JSONObject =
+        get("https://api.bilibili.com/x/space/upstat?mid=$mid", space = true)
+
+    /** UP 投稿(支持 order: pubdate / click / stow)。 */
+    suspend fun spaceVideos(mid: Long, pn: Int, order: String): JSONObject =
+        wbiGet("https://api.bilibili.com/x/space/wbi/arc/search",
+            mapOf("mid" to mid.toString(), "ps" to "30", "pn" to pn.toString(), "order" to order),
+            space = true)
+
+    /** 投稿兜底接口(不带 wbi,风控时用)。 */
+    suspend fun spaceVideosFallback(mid: Long, pn: Int): JSONObject =
+        get("https://api.bilibili.com/x/space/arc/list?mid=$mid&pn=$pn&ps=30", space = true)
+
+    /** 空间动态(主页动态 tab)。offset 为上一页返回的 data.offset。 */
+    suspend fun spaceDynamics(mid: Long, offset: String = ""): JSONObject =
+        wbiGet("https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space",
+            mapOf("host_mid" to mid.toString(), "offset" to offset, "features" to "itemOpusStyle"),
+            space = true)
+
+    /** 某 UP 公开的收藏夹列表(up_mid 指定别人)。 */
+    suspend fun favFoldersOf(mid: Long): JSONObject =
+        wbiGet("https://api.bilibili.com/x/v3/fav/folder/created/list-all",
+            mapOf("up_mid" to mid.toString()), space = false)
+
+    /** 关注关系:data.attribute 0 未关注 / 2 已关注 / 6 互关;未登录 code=-101。 */
+    suspend fun relation(mid: Long): JSONObject =
+        get("https://api.bilibili.com/x/relation?fid=$mid", space = true)
+
+    /** 当前登录态 csrf(bili_jct),发 POST 改状态用。 */
+    val csrf: String
+        get() = Regex("bili_jct=([^;]+)").find(cookie)?.groupValues?.getOrNull(1) ?: ""
+
+    /** 关注/取关:act=1 关注,act=2 取关。 */
+    suspend fun modifyRelation(mid: Long, act: Int): JSONObject =
+        publicPost("https://api.bilibili.com/x/relation/modify", mapOf(
+            "fid" to mid.toString(), "act" to act.toString(),
+            "re_src" to "11", "csrf" to csrf))
 }

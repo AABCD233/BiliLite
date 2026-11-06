@@ -1158,11 +1158,14 @@ data class PlayReq(val video: Video, val playlist: List<Video> = emptyList(), va
 @Composable
 fun HomeScreen(vm: BiliViewModel,
                onPlay: (Video, List<Video>) -> Unit = { _, _ -> },
+               onOpenUp: (String) -> Unit = {},
                isTablet: Boolean = false,
                listState: androidx.compose.foundation.lazy.LazyListState = androidx.compose.foundation.lazy.rememberLazyListState(),
                gridState: androidx.compose.foundation.lazy.grid.LazyGridState = androidx.compose.foundation.lazy.grid.rememberLazyGridState()) {
     var input by remember { mutableStateOf("") }        // 输入框内容(仅临时)
     var showUpPicker by remember { mutableStateOf(false) }
+    // v0.6.0: 首页 UP 入口——选一个已添加 UP 进他的空间主页
+    var showUpSpacePicker by remember { mutableStateOf(false) }
     // v0.4.15: 筛选区(排序/UP/分组/已看)默认收起,点击"筛选"展开,减少首页顶部占用
     var filtersExpanded by remember { mutableStateOf(false) }
 
@@ -1240,8 +1243,14 @@ fun HomeScreen(vm: BiliViewModel,
                 modifier = Modifier.height(46.dp)) {
                 Text("搜索", color = Color.White)
             }
+            // v0.6.0: UP 主页入口(选已添加的 UP 进空间页)
+            TextButton(onClick = { showUpSpacePicker = true },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
+                Text("UP", color = C.t2, fontSize = 13.sp)
+            }
             // v0.4.15: 筛选区收起/展开按钮(默认收起)
-            TextButton(onClick = { filtersExpanded = !filtersExpanded }) {
+            TextButton(onClick = { filtersExpanded = !filtersExpanded },
+                contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 6.dp)) {
                 Text(if (filtersExpanded) "收起 ▴" else "筛选 ▾", color = C.t2, fontSize = 13.sp)
             }
         }
@@ -1321,6 +1330,39 @@ fun HomeScreen(vm: BiliViewModel,
         }
 
         } // v0.4.15: filtersExpanded 闭合
+
+        // v0.6.0: 选择要进入主页的 UP
+        if (showUpSpacePicker) {
+            AlertDialog(
+                onDismissRequest = { showUpSpacePicker = false },
+                confirmButton = { TextButton(onClick = { showUpSpacePicker = false }) { Text("取消", color = C.t2) } },
+                title = { Text("进入 UP 主页", color = C.t1, fontSize = 16.sp) },
+                text = {
+                    if (vm.ups.isEmpty()) {
+                        Text("还没有添加 UP 主", color = C.t2, fontSize = 13.sp)
+                    } else {
+                        LazyColumn(Modifier.heightIn(max = 340.dp)) {
+                            items(vm.ups, key = { it.id }) { u ->
+                                Row(Modifier.fillMaxWidth()
+                                    .clickable { showUpSpacePicker = false; onOpenUp(u.id) }
+                                    .padding(horizontal = 8.dp, vertical = 10.dp),
+                                    verticalAlignment = Alignment.CenterVertically) {
+                                    if (u.face.isNotEmpty()) {
+                                        AsyncImage(model = coverThumb(u.face, 96, 96), contentDescription = u.name,
+                                            modifier = Modifier.size(34.dp).clip(CircleShape).background(C.line))
+                                        Spacer(Modifier.width(10.dp))
+                                    }
+                                    Text((if (u.grp.isNotBlank()) "[${u.grp}] " else "") + u.name,
+                                        color = C.t1, fontSize = 14.sp, modifier = Modifier.weight(1f))
+                                    if (u.fans > 0) Text("${fmtPlay(u.fans)}粉丝", color = C.t2, fontSize = 11.sp)
+                                }
+                            }
+                        }
+                    }
+                },
+                containerColor = C.card
+            )
+        }
 
         // UP 选择弹层
         if (showUpPicker) {
@@ -1408,7 +1450,8 @@ fun HomeScreen(vm: BiliViewModel,
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)
             ) {
                 gridItems(feed, key = { it.id }) { v -> VideoCardVertical(v, upName[v.upId] ?: "",
-                    onClick = { onPlay(v, feed) }, onToggleFav = { vm.toggleFavorite(v) }, watched = v.id in vm.watchedIds) }
+                    onClick = { onPlay(v, feed) }, onToggleFav = { vm.toggleFavorite(v) }, watched = v.id in vm.watchedIds,
+                    onUpClick = { onOpenUp(v.upId) }) }
             }
         } else {
             // 手机:列表(v0.3:listState 由外部持有,播放返回后保持滚动位置;key 稳定 item 身份)
@@ -1417,7 +1460,8 @@ fun HomeScreen(vm: BiliViewModel,
                 verticalArrangement = Arrangement.spacedBy(8.dp),
                 contentPadding = androidx.compose.foundation.layout.PaddingValues(16.dp)) {
                 items(feed, key = { it.id }) { v -> VideoRow(v, upName[v.upId] ?: "", onClick = { onPlay(v, feed) },
-                    onToggleFav = { vm.toggleFavorite(v) }, watched = v.id in vm.watchedIds) }
+                    onToggleFav = { vm.toggleFavorite(v) }, watched = v.id in vm.watchedIds,
+                    onUpClick = { onOpenUp(v.upId) }) }
             }
         }
     }
@@ -1425,7 +1469,8 @@ fun HomeScreen(vm: BiliViewModel,
 
 /** 平板竖版卡片:上封面,下标题/UP/信息 */
 @Composable
-private fun VideoCardVertical(v: Video, upName: String, onClick: () -> Unit, onToggleFav: () -> Unit, watched: Boolean = false) {
+private fun VideoCardVertical(v: Video, upName: String, onClick: () -> Unit, onToggleFav: () -> Unit,
+                              watched: Boolean = false, onUpClick: (() -> Unit)? = null) {
     Card(colors = CardDefaults.cardColors(containerColor = BILICARD), onClick = onClick,
         modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.fillMaxWidth()) {
@@ -1453,9 +1498,17 @@ private fun VideoCardVertical(v: Video, upName: String, onClick: () -> Unit, onT
                     }
                 }
                 Spacer(Modifier.height(4.dp))
-                Text((if (upName.isNotEmpty()) "$upName" else "") +
-                     (if (v.playCount > 0) " · ${fmtPlay(v.playCount)}播放" else ""),
-                     color = C.t2, fontSize = 11.sp, maxLines = 1)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (upName.isNotEmpty()) {
+                        Text(upName, color = C.t2, fontSize = 11.sp, maxLines = 1,
+                            modifier = Modifier.weight(1f, fill = false)
+                                .clickable { onUpClick?.invoke() })
+                    }
+                    if (v.playCount > 0) {
+                        Text((if (upName.isNotEmpty()) " · " else "") + "${fmtPlay(v.playCount)}播放",
+                            color = C.t2, fontSize = 11.sp, maxLines = 1)
+                    }
+                }
             }
         }
     }
@@ -1463,7 +1516,8 @@ private fun VideoCardVertical(v: Video, upName: String, onClick: () -> Unit, onT
 
 /** 单条横版大卡:左侧封面,右侧标题/UP/信息 */
 @Composable
-fun VideoRow(v: Video, upName: String = "", onClick: () -> Unit = {}, onToggleFav: (() -> Unit)? = null, watched: Boolean = false) {
+fun VideoRow(v: Video, upName: String = "", onClick: () -> Unit = {}, onToggleFav: (() -> Unit)? = null,
+             watched: Boolean = false, onUpClick: (() -> Unit)? = null) {
     Card(colors = CardDefaults.cardColors(containerColor = BILICARD),
         onClick = onClick) {
         Row(Modifier.fillMaxWidth().padding(10.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -1489,10 +1543,16 @@ fun VideoRow(v: Video, upName: String = "", onClick: () -> Unit = {}, onToggleFa
                         modifier = Modifier.weight(1f))
                 }
                 Spacer(Modifier.height(4.dp))
-                Text((if (upName.isNotEmpty()) "$upName · " else "") +
-                     "${v.durationSec / 60}:${(v.durationSec % 60).toString().padStart(2, '0')}" +
-                     (if (v.playCount > 0) " · ${fmtPlay(v.playCount)}播放" else ""),
-                     color = C.t2, fontSize = 11.sp)
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    if (upName.isNotEmpty()) {
+                        Text(upName, color = C.t2, fontSize = 11.sp, maxLines = 1,
+                            modifier = Modifier.clickable { onUpClick?.invoke() })
+                        Text(" · ", color = C.t2, fontSize = 11.sp)
+                    }
+                    Text("${v.durationSec / 60}:${(v.durationSec % 60).toString().padStart(2, '0')}" +
+                         (if (v.playCount > 0) " · ${fmtPlay(v.playCount)}播放" else ""),
+                         color = C.t2, fontSize = 11.sp, maxLines = 1)
+                }
             }
             if (onToggleFav != null) {
                 TextButton(onClick = onToggleFav) {

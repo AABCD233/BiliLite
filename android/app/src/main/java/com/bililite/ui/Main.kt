@@ -163,6 +163,8 @@ private fun BiliAppContent() {
     var tab by remember { mutableStateOf(0) } // 0 首页 1 我的
     // 播放上下文 (null = 未在播放;含连播列表)
     var playing by remember { mutableStateOf<PlayReq?>(null) }
+    // v0.6.0: 当前打开的 UP 空间页(mid;null = 未打开)
+    var spaceMid by remember { mutableStateOf<String?>(null) }
     // 书签/历史跳转的目标秒数（非 null 时播放器从该时间点开始）
     var pendingSeekSec by remember { mutableStateOf<Long?>(null) }
     // 跳转的目标分P cid（非 null 时优先于 Video.cid，解决多P非P1跳转）
@@ -172,6 +174,7 @@ private fun BiliAppContent() {
     var backPressedOnce by remember { mutableStateOf(false) }
     val scope = rememberCoroutineScope()
     BackHandler(enabled = true) {
+        if (spaceMid != null) { spaceMid = null; return@BackHandler }
         if (cur != null) {
             playing = null; pendingCid = null; pendingSeekSec = null; return@BackHandler
         }
@@ -242,6 +245,24 @@ private fun BiliAppContent() {
         }
         return
     }
+    // v0.6.0: UP 空间页(从首页 UP 入口或视频卡上的 UP 名进入)
+    val sm = spaceMid
+    if (sm != null) {
+        val fb = vm.ups.firstOrNull { it.id == sm }
+        Surface(Modifier.fillMaxSize().then(if (isTablet) Modifier.statusBarsPadding() else Modifier),
+            color = BILIBLACK) {
+            SpaceScreen(
+                vm = vm, mid = sm, fallback = fb,
+                onBack = { spaceMid = null },
+                onPlay = { v, list ->
+                    spaceMid = null
+                    playing = PlayReq(v, list)
+                }
+            )
+        }
+        return
+    }
+
     // v0.4.19插件系统:主题插件的背景图(若有)铺满,内容叠在上层。按设备类型选手机/平板图。
     val bgPath = if (isTablet) com.bililite.core.BiliTheme.backgroundImagePathTablet
                  else com.bililite.core.BiliTheme.backgroundImagePath
@@ -291,6 +312,7 @@ private fun BiliAppContent() {
                     Box(Modifier.weight(1f).fillMaxHeight()) {
                         when (tab) {
                             0 -> HomeScreen(vm, onPlay = { v, list -> playing = PlayReq(v, list) },
+                                onOpenUp = { spaceMid = it },
                                 isTablet = true, listState = homeListState, gridState = homeGridState)
                             else -> ProfileScreen(vm, onLoggedOut = { vm.rebind(); loggedIn = false; tab = 0 },
                                 onPlay = { v, list -> playing = PlayReq(v, list) },
@@ -339,6 +361,7 @@ private fun BiliAppContent() {
                     }) {
                         when (tab) {
                             0 -> HomeScreen(vm, onPlay = { v, list -> playing = PlayReq(v, list) },
+                                onOpenUp = { spaceMid = it },
                                 listState = homeListState)
                             else -> ProfileScreen(vm, onLoggedOut = { vm.rebind(); loggedIn = false; tab = 0 },
                                 onPlay = { v, list -> playing = PlayReq(v, list) },
