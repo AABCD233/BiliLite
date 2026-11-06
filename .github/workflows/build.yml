@@ -33,7 +33,9 @@ jobs:
       # CI 当编译器用：先出 APK，测试失败也不影响拿安装包
       - name: Build debug APK
         working-directory: android
-        run: ./gradlew assembleDebug --no-daemon --stacktrace
+        run: |
+          chmod +x gradlew
+          ./gradlew assembleDebug --no-daemon --stacktrace
 
       - name: Upload APK
         uses: actions/upload-artifact@v4
@@ -44,5 +46,7 @@ jobs:
 
       - name: Unit tests
         working-directory: android
-        run: ./gradlew testDebugUnitTest --no-daemon
+        run: |
+          chmod +x gradlew
+          ./gradlew testDebugUnitTest --no-daemon
         continue-on-error: true
