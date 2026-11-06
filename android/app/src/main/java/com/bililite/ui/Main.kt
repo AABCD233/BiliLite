@@ -176,6 +176,7 @@ private fun BiliAppContent() {
     BackHandler(enabled = true) {
         if (spaceMid != null) { spaceMid = null; return@BackHandler }
         if (cur != null) {
+            com.bililite.core.BiliLog.i("Main", "back: close player bvid=${cur.video.bvid}")
             playing = null; pendingCid = null; pendingSeekSec = null; return@BackHandler
         }
         if (tab != 0) { tab = 0; return@BackHandler }

@@ -14,6 +14,8 @@ import android.view.WindowInsets
 import android.view.WindowInsetsController
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInVertically
@@ -92,6 +94,7 @@ data class PageInfo(val cid: Long, val part: String)
 
 /** 沉浸式:隐藏状态栏+导航栏(API30+ 用 WindowInsetsController) */
 private fun setImmersive(activity: Activity?, on: Boolean) {
+    try { com.bililite.core.BiliLog.i("Immersive", "set on=$on sdk=${Build.VERSION.SDK_INT}") } catch (_: Exception) {}
     val a = activity ?: return
     try {
         if (on) {
@@ -190,6 +193,26 @@ fun PlayerScreen(
 
     val activity = LocalContext.current as? Activity
     val scope = rememberCoroutineScope()
+    // v0.6.0: 退出播放页时先淡出再卸载,避免 TextureView 销毁瞬间的闪跳("抽搐")
+    val exitAlpha = remember { Animatable(1f) }
+    var exiting by remember { mutableStateOf(false) }
+    fun exitWithFade() {
+        if (exiting) return
+        exiting = true
+        com.bililite.core.BiliLog.i("PlayerScreen", "exit bvid=$bvid fullscreen=$fullscreen zoomed=$zoomed")
+        scope.launch {
+            exitAlpha.animateTo(0f, tween(140))
+            onBack()
+        }
+    }
+    LaunchedEffect(Unit) {
+        com.bililite.core.BiliLog.i("PlayerScreen", "enter bvid=$bvid cid=$cid")
+    }
+    DisposableEffect(Unit) {
+        onDispose { com.bililite.core.BiliLog.i("PlayerScreen", "dispose bvid=$bvid") }
+    }
+    // 非全屏/非缩放时,返回键走淡出退出
+    BackHandler(enabled = !fullscreen && !zoomed) { exitWithFade() }
 
     // v0.3: 播放结束 → 先看有没有下一P(分P连播),没有则请求连播列表的下一集
     LaunchedEffect(endedSignal) {
@@ -249,13 +272,13 @@ fun PlayerScreen(
     val curPageIdx = pages.indexOfFirst { it.cid == curCid }.coerceAtLeast(0)
     val curPageTitle = pages.getOrNull(curPageIdx)?.part ?: ""
 
-    Box(Modifier.fillMaxSize().background(C.bg)) {
+    Box(Modifier.fillMaxSize().background(C.bg).graphicsLayer { alpha = exitAlpha.value }) {
         Column(Modifier.fillMaxSize()) {
             if (!fullscreen) {
                 Surface(color = C.bg) {
                     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp),
                         verticalAlignment = Alignment.CenterVertically) {
-                        TextButton(onClick = onBack) { Text("← 返回", color = C.t1) }
+                        TextButton(onClick = { exitWithFade() }) { Text("← 返回", color = C.t1) }
                         Text(title, color = C.t1, fontSize = 14.sp, maxLines = 1, modifier = Modifier.weight(1f))
                     }
                 }
@@ -984,6 +1007,10 @@ private fun Player(
         }
     }
 
+    // v0.6.0: 记录全屏切换,便于排查退出时的画面跳动
+    LaunchedEffect(fullscreen) {
+        com.bililite.core.BiliLog.i("PlayerScreen", "fullscreen=$fullscreen")
+    }
     // v0.4.4: 退出全屏时自动解除屏幕锁定(避免方向被卡在横屏)
     LaunchedEffect(fullscreen) {
         if (!fullscreen && screenLocked) {

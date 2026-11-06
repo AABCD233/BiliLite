@@ -1735,7 +1735,7 @@ fun ProfileScreen(vm: BiliViewModel, onLoggedOut: () -> Unit = {},
             }, false),
             Triple("插件", { showPlugins = true }, false),
             // v0.6.0: 数据备份/日志页之前没有入口(showSync 从未被置 true),补上
-            Triple("数据备份", { showSync = true }, false),
+            Triple("日志与备份", { showSync = true }, false),
             Triple("账号管理", { showAccount = true }, false)))
 
         // v0.4.20 插件系统:渲染插件通过 ui.registerMenu 注册的自定义入口
@@ -1766,13 +1766,14 @@ fun ProfileScreen(vm: BiliViewModel, onLoggedOut: () -> Unit = {},
                                 android.net.Uri.parse("https://github.com/bggRGjQaUbCoE/PiliPlus")))
                         } catch (_: Exception) {}
                     })
-                Text("原项目：github.com/HYXTPSP/BiliLite",
+                // 链接指向本项目(二改版),不再跳到上游,避免误点后以为装错版本
+                Text("本项目：github.com/AABCD233/BiliLite",
                     color = C.primary, fontSize = 11.sp,
                     modifier = Modifier.clickable {
                         try {
                             ctx.startActivity(android.content.Intent(
                                 android.content.Intent.ACTION_VIEW,
-                                android.net.Uri.parse("https://github.com/HYXTPSP/BiliLite")))
+                                android.net.Uri.parse("https://github.com/AABCD233/BiliLite")))
                         } catch (_: Exception) {}
                     })
             }
@@ -2799,6 +2800,15 @@ private fun SyncScreen(vm: BiliViewModel, onBack: () -> Unit) {
             enabled = !busy, modifier = Modifier.fillMaxWidth()) {
             Text("导出日志文件", color = C.t1)
         }
+        Spacer(Modifier.height(8.dp))
+        OutlinedButton(onClick = {
+            com.bililite.core.BiliLog.clear()
+            resultMsg = "✓ 日志已清空"
+        }, enabled = !busy, modifier = Modifier.fillMaxWidth()) {
+            Text("清空日志", color = Color(0xFFFF3B30))
+        }
+        Text("日志自动清理:单文件超 1MB 轮转,最多保留 log.txt + log.old.txt,启动时删除 7 天前的日志。",
+            color = C.t2, fontSize = 11.sp, modifier = Modifier.padding(top = 6.dp))
         Spacer(Modifier.height(12.dp))
         OutlinedButton(onClick = {
             scope.launch {
