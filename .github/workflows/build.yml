@@ -10,6 +10,9 @@ on:
       - 'web/**'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
@@ -50,6 +53,18 @@ jobs:
           APKSIGNER=$(ls $ANDROID_HOME/build-tools/*/apksigner | sort -V | tail -1)
           $APKSIGNER verify --print-certs android/app/build/outputs/apk/debug/app-debug.apk | tee /tmp/certs.txt
           grep -qi "00dc1224dc45800c192740fe77bb8bdaf8024aaba5c49576fd0703b311b06e05" /tmp/certs.txt
+
+      # 每次 push 覆盖同一个「CI 测试包」预发布,不占版本号,方便手机上直接装
+      - name: Update CI pre-release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ci-latest
+          name: CI 测试包（自动更新）
+          prerelease: true
+          body: |
+            每次 push 自动覆盖，仅供测试；正式版见 v* Release。
+          files: android/app/build/outputs/apk/debug/app-debug.apk
+          fail_on_unmatched_files: true
 
       - name: Unit tests
         working-directory: android

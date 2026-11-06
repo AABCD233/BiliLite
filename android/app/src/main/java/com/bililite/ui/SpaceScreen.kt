@@ -72,6 +72,11 @@ private data class SpaceDyn(
 
 private data class SpaceFavFolder(val id: Long, val title: String, val count: Int)
 
+/** 合集 / 系列(投稿子 tab 用)。season=true 表示视频合集,false 表示系列。 */
+private data class SpaceCollection(
+    val id: Long, val title: String, val cover: String, val total: Int, val season: Boolean
+)
+
 @Composable
 fun SpaceScreen(
     vm: BiliViewModel,
@@ -117,6 +122,17 @@ fun SpaceScreen(
     var openFolder by remember { mutableStateOf<SpaceFavFolder?>(null) }
     var folderVideos by remember { mutableStateOf<List<Video>>(emptyList()) }
     var loadingFolderVideos by remember { mutableStateOf(false) }
+
+    // 投稿子 tab:0 视频 1 合集 2 系列
+    var collSub by remember { mutableStateOf(0) }
+    var seasons by remember(mid) { mutableStateOf<List<SpaceCollection>>(emptyList()) }
+    var series by remember(mid) { mutableStateOf<List<SpaceCollection>>(emptyList()) }
+    var collLoaded by remember { mutableStateOf(false) }
+    var collLoading by remember { mutableStateOf(false) }
+    var collError by remember { mutableStateOf("") }
+    var openColl by remember { mutableStateOf<SpaceCollection?>(null) }
+    var collVideos by remember { mutableStateOf<List<Video>>(emptyList()) }
+    var collVideosLoading by remember { mutableStateOf(false) }
 
     // 关注状态:0 未知/未登录(隐藏按钮),1 未关注,2 已关注
     var followState by remember { mutableStateOf(0) }
@@ -280,13 +296,56 @@ fun SpaceScreen(
         }
     }
 
+    suspend fun loadCollections() {
+        if (collLoading) return
+        collLoading = true; collError = ""
+        try {
+            val j = withContext(Dispatchers.IO) {
+                runCatching { api.seasonsSeriesList(midLong) }.getOrNull()
+            }
+            val lists = j?.optJSONObject("data")?.optJSONObject("items_lists")
+            if (j == null || j.optInt("code", -1) != 0 || lists == null) {
+                collError = "合集加载失败"
+                return
+            }
+            seasons = parseCollections(lists.optJSONArray("seasons_list"), true)
+            series = parseCollections(lists.optJSONArray("series_list"), false)
+            collLoaded = true
+            if (seasons.isEmpty() && series.isEmpty()) collError = "该 UP 暂无合集/系列"
+        } catch (e: Exception) {
+            collError = "合集加载失败: ${e.message ?: ""}"
+        } finally {
+            collLoading = false
+        }
+    }
+
+    suspend fun loadCollectionVideos(c: SpaceCollection) {
+        collVideosLoading = true
+        collVideos = emptyList()
+        try {
+            val j = withContext(Dispatchers.IO) {
+                runCatching {
+                    if (c.season) api.seasonArchivesList(c.id, 1)
+                    else api.seriesArchivesList(c.id, 1)
+                }.getOrNull()
+            }
+            collVideos = parseArchives(j)
+        } catch (_: Exception) {
+            collVideos = emptyList()
+        } finally {
+            collVideosLoading = false
+        }
+    }
+
     LaunchedEffect(mid) {
         loadProfile()
         loadVideos(reset = true)
     }
     LaunchedEffect(tab) {
+        // tab: 0 主页 / 1 动态 / 2 投稿 / 3 收藏
         when (tab) {
-            2 -> if (dyns.isEmpty() && !loadingDyn) loadDynamics(false)
+            1 -> if (dyns.isEmpty() && !loadingDyn) loadDynamics(false)
+            2 -> if (!collLoaded && !collLoading) loadCollections()
             3 -> if (folders.isEmpty() && !loadingFolders) loadFolders()
         }
     }
@@ -358,7 +417,7 @@ fun SpaceScreen(
         }
 
         when (tab) {
-            0, 1 -> VideosTab(
+            0 -> VideosTab(
                 cols = cols, videos = videos, total = total, sort = sort,
                 onSort = { s ->
                     sort = s; videos = emptyList(); page = 1; total = 0
@@ -368,8 +427,25 @@ fun SpaceScreen(
                 onPlay = onPlay,
                 onLoadMore = { scope.launch { loadVideos(reset = false) } }
             )
-            2 -> DynamicsTab(dyns, loadingDyn, dynError, dynHasMore,
+            1 -> DynamicsTab(dyns, loadingDyn, dynError, dynHasMore,
                 onLoadMore = { scope.launch { loadDynamics(true) } })
+            2 -> ContributeTab(
+                cols = cols, videos = videos, total = total, sort = sort,
+                onSort = { s ->
+                    sort = s; videos = emptyList(); page = 1; total = 0
+                    scope.launch { loadVideos(reset = true, sortMode = s) }
+                },
+                loading = loadingVideos, error = videosError,
+                onPlay = onPlay,
+                onLoadMore = { scope.launch { loadVideos(reset = false) } },
+                sub = collSub, onSub = { collSub = it; openColl = null; collVideos = emptyList() },
+                seasons = seasons, series = series,
+                collLoading = collLoading, collError = collError,
+                openColl = openColl, collVideos = collVideos,
+                collVideosLoading = collVideosLoading,
+                onOpenColl = { c -> openColl = c; scope.launch { loadCollectionVideos(c) } },
+                onCloseColl = { openColl = null; collVideos = emptyList() }
+            )
             else -> FavoritesTab(
                 folders = folders, error = folderError, loading = loadingFolders,
                 openFolderItem = openFolder, videos = folderVideos, loadingVideos = loadingFolderVideos,
@@ -513,6 +589,129 @@ private fun VideosTab(
                         else TextButton(onClick = onLoadMore) {
                             Text("加载更多", color = C.t2, fontSize = 12.sp)
                         }
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContributeTab(
+    cols: Int,
+    videos: List<Video>,
+    total: Int,
+    sort: Int,
+    onSort: (Int) -> Unit,
+    loading: Boolean,
+    error: String,
+    onPlay: (Video, List<Video>) -> Unit,
+    onLoadMore: () -> Unit,
+    sub: Int,
+    onSub: (Int) -> Unit,
+    seasons: List<SpaceCollection>,
+    series: List<SpaceCollection>,
+    collLoading: Boolean,
+    collError: String,
+    openColl: SpaceCollection?,
+    collVideos: List<Video>,
+    collVideosLoading: Boolean,
+    onOpenColl: (SpaceCollection) -> Unit,
+    onCloseColl: () -> Unit
+) {
+    Column(Modifier.fillMaxSize()) {
+        // 投稿子 tab:视频 / 合集 / 系列(PiliPlus 同款层级)
+        Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 6.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("视频", "合集", "系列").forEachIndexed { i, label ->
+                val on = sub == i
+                Surface(color = if (on) C.block else C.card,
+                    shape = RoundedCornerShape(16.dp),
+                    border = if (on) null else androidx.compose.foundation.BorderStroke(1.dp, C.line),
+                    modifier = Modifier.clickable { onSub(i) }) {
+                    Text(label, fontSize = 12.sp, color = if (on) C.onBlock else C.t2,
+                        modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp))
+                }
+            }
+            Spacer(Modifier.weight(1f))
+            if (openColl != null) {
+                Text(openColl.title, color = C.t2, fontSize = 11.sp, maxLines = 1,
+                    overflow = TextOverflow.Ellipsis)
+            }
+        }
+
+        if (sub == 0) {
+            VideosTab(cols, videos, total, sort, onSort, loading, error, onPlay, onLoadMore)
+            return@Column
+        }
+
+        // 合集/系列详情
+        if (openColl != null) {
+            Column(Modifier.fillMaxSize()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    TextButton(onClick = onCloseColl) {
+                        Text("← ${if (openColl.season) "合集" else "系列"}", color = C.t1, fontSize = 13.sp)
+                    }
+                    Spacer(Modifier.weight(1f))
+                    Text("${openColl.total} 个视频", color = C.t2, fontSize = 11.sp)
+                }
+                when {
+                    collVideosLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        CircularProgressIndicator(color = C.t1, modifier = Modifier.size(26.dp))
+                    }
+                    collVideos.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                        Text("暂无视频", color = C.t2, fontSize = 13.sp)
+                    }
+                    else -> LazyVerticalGrid(
+                        columns = GridCells.Fixed(cols),
+                        modifier = Modifier.fillMaxSize(),
+                        contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        gridItems(collVideos, key = { it.id }) { v ->
+                            SpaceVideoCard(v) { onPlay(v, collVideos) }
+                        }
+                    }
+                }
+            }
+            return@Column
+        }
+
+        val list = if (sub == 1) seasons else series
+        when {
+            collLoading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                CircularProgressIndicator(color = C.t1, modifier = Modifier.size(26.dp))
+            }
+            list.isEmpty() -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+                Text(collError.ifBlank { if (sub == 1) "暂无合集" else "暂无系列" },
+                    color = C.t2, fontSize = 13.sp)
+            }
+            else -> LazyVerticalGrid(
+                columns = GridCells.Fixed(cols),
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp),
+                verticalArrangement = Arrangement.spacedBy(10.dp),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                gridItems(list, key = { it.id }) { c ->
+                    Column(Modifier.clickable { onOpenColl(c) }) {
+                        Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f)
+                            .clip(RoundedCornerShape(8.dp)).background(C.line)) {
+                            if (c.cover.isNotEmpty()) {
+                                AsyncImage(model = c.cover, contentDescription = c.title,
+                                    contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+                            }
+                            Text("${c.total}个视频", color = Color.White, fontSize = 10.sp,
+                                modifier = Modifier.align(Alignment.BottomEnd).padding(4.dp)
+                                    .background(Color(0xCC000000), RoundedCornerShape(3.dp))
+                                    .padding(horizontal = 4.dp, vertical = 1.dp))
+                        }
+                        Spacer(Modifier.height(4.dp))
+                        Text(c.title, color = C.t1, fontSize = 13.sp, maxLines = 2,
+                            overflow = TextOverflow.Ellipsis)
                     }
                 }
             }
@@ -780,6 +979,45 @@ private fun parseDynamic(o: JSONObject?): SpaceDyn? {
     )
 }
 
+private fun parseCollections(arr: org.json.JSONArray?, season: Boolean): List<SpaceCollection> {
+    if (arr == null || arr.length() == 0) return emptyList()
+    val out = ArrayList<SpaceCollection>(arr.length())
+    for (i in 0 until arr.length()) {
+        val meta = arr.optJSONObject(i)?.optJSONObject("meta") ?: continue
+        val id = if (season) meta.optLong("season_id", 0L) else meta.optLong("series_id", 0L)
+        if (id <= 0) continue
+        out.add(SpaceCollection(
+            id = id,
+            title = meta.optString("name", ""),
+            cover = normalizeUrl(meta.optString("cover", "")),
+            total = meta.optInt("total", 0),
+            season = season
+        ))
+    }
+    return out
+}
+
+/** 合集/系列详情里的 archives(字段与视频列表不同:封面叫 pic,播放量在 stat.view)。 */
+private fun parseArchives(j: JSONObject?): List<Video> {
+    val arr = j?.optJSONObject("data")?.optJSONArray("archives") ?: return emptyList()
+    val out = ArrayList<Video>(arr.length())
+    for (i in 0 until arr.length()) {
+        val o = arr.optJSONObject(i) ?: continue
+        val bvid = o.optString("bvid", "")
+        if (bvid.isEmpty()) continue
+        out.add(Video(
+            id = o.optLong("aid", bvid.hashCode().toLong()),
+            bvid = bvid, upId = "",
+            title = o.optString("title", ""),
+            durationSec = o.optInt("duration", 0),
+            pic = normalizeUrl(o.optString("pic", o.optString("cover", ""))),
+            playCount = o.optJSONObject("stat")?.optLong("view", 0L) ?: 0L,
+            pubdate = o.optLong("pubdate", 0L)
+        ))
+    }
+    return out
+}
+
 private fun parseFavVideos(j: JSONObject?): List<Video> {
     val data = j?.optJSONObject("data") ?: return emptyList()
     val medias = data.optJSONArray("medias") ?: return emptyList()
@@ -830,7 +1068,11 @@ private fun fmtRelTime(sec: Long): String {
         diff < 86_400 -> "${diff / 3600}小时前"
         diff < 7 * 86_400 -> "${diff / 86_400}天前"
         else -> try {
-            SimpleDateFormat("MM-dd", Locale.getDefault()).format(Date(sec * 1000))
+            // 超过 7 天显示具体发布日期(与 B 站一致:今年 10月31日,往年 2025年10月31日)
+            val d = Date(sec * 1000)
+            val nowYear = java.util.Calendar.getInstance().get(java.util.Calendar.YEAR)
+            val dYear = java.util.Calendar.getInstance().apply { time = d }.get(java.util.Calendar.YEAR)
+            SimpleDateFormat(if (dYear == nowYear) "M月d日" else "yyyy年M月d日", Locale.getDefault()).format(d)
         } catch (_: Exception) { "" }
     }
 }

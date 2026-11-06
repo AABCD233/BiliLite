@@ -230,7 +230,8 @@ fun PlayerScreen(
             fullscreen -> { fullscreen = false; setImmersive(activity, false) }
         }
     }
-    DisposableEffect(Unit) { onDispose { setImmersive(activity, false) } }
+    // v0.6.0: 退出播放页时不要再 setImmersive(false)——那会把状态栏拉回来造成"抽搐/跳动"。
+    // 全屏退出已经由 fullscreen 的 LaunchedEffect 处理;页面销毁不动系统栏。
 
     // 当前分P序号/标题（用于书签记录）
     val curPageIdx = pages.indexOfFirst { it.cid == curCid }.coerceAtLeast(0)
@@ -1238,6 +1239,17 @@ private fun Player(
                     )
                 }
             )
+        }
+
+        // v0.6.0: 暂停时中央大播放键(PiliPlus 风格,点一下继续)
+        if (showControls && !isPlaying) {
+            Box(Modifier.align(Alignment.Center).size(64.dp)
+                .clip(CircleShape).background(Color(0x66000000))
+                .clickable { togglePlay() },
+                contentAlignment = Alignment.Center) {
+                Icon(Icons.Filled.PlayArrow, contentDescription = "播放",
+                    tint = Color.White, modifier = Modifier.size(40.dp))
+            }
         }
 
         // 亮度/音量/倍速/进度指示器。倍速提示显示在顶部,其余(亮度/音量/进度)居中。
