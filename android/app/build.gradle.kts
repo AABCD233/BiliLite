@@ -8,7 +8,7 @@ android {
     compileSdk = 35
     buildToolsVersion = "35.0.0"
     defaultConfig { applicationId = "com.bililite.app"; minSdk = 24; targetSdk = 35
-        versionCode = 19; versionName = "0.6.0" }
+        versionCode = 20; versionName = "0.6.1" }
     signingConfigs {
         // 固定签名:仓库内自带证书,CI 与本机共用同一指纹,保证覆盖安装不冲突。
         // 口令/别名都是 bililite。改证书会让老用户无法覆盖安装,不要动。
