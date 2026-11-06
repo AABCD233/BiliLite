@@ -12,7 +12,7 @@ BiliLite 是一款用极简风格设计的,专注于学习的学习版 B 站,从
 
 ## AI 二改说明
 
-本仓库是 [HYXTPSP/BiliLite](https://github.com/HYXTPSP/BiliLite) 的**二次修改版（二改）**，代码由 AI（DeepSeek）在手机上通过对话完成修改与构建验证，不是原作者发布。
+本仓库是 [HYXTPSP/BiliLite](https://github.com/HYXTPSP/BiliLite) 的**二次修改版（二改）**，代码使用dsh完成修改与构建验证，非原作者发布。
 
 - **改动范围**：UP 空间页、播放器控制条/截图/字幕设置、日志入口、开源声明、CI/签名等；上游原有功能尽量保持不动。
 - **代码来源**：Kotlin/Compose 代码为本仓库编写或在上游基础上修改；UP 空间页与播放器部分界面/交互参考 [PiliPlus](https://github.com/bggRGjQaUbCoE/PiliPlus)（GPL-3.0），均为 Kotlin 重写，未直接复制其 Dart 源码。
