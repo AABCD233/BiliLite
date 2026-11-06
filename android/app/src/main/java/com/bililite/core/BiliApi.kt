@@ -649,7 +649,9 @@ class BiliApi(private val ctx: Context) {
     /** 空间动态(主页动态 tab)。offset 为上一页返回的 data.offset。 */
     suspend fun spaceDynamics(mid: Long, offset: String = ""): JSONObject =
         wbiGet("https://api.bilibili.com/x/polymer/web-dynamic/v1/feed/space",
-            mapOf("host_mid" to mid.toString(), "offset" to offset, "features" to "itemOpusStyle"),
+            mapOf("host_mid" to mid.toString(), "offset" to offset,
+                "features" to "itemOpusStyle,listOnlyfans,opusBigCover,onlyfansVote,forwardListHidden," +
+                    "decorationCard,commentsNewVersion,onlyfansAssetsV2,ugcDelete,onlyfansQaCard"),
             space = true)
 
     /** 某 UP 公开的收藏夹列表(up_mid 指定别人)。 */

@@ -9,6 +9,11 @@ import android.view.TextureView
 import android.view.WindowInsets
 import android.view.WindowInsetsController
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.detectTapGestures
@@ -41,11 +46,13 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -245,6 +252,7 @@ fun PlayerScreen(
             val movablePlayer = remember(bvid) {
                 movableContentOf {
                     Player(api, bvid, curCid,
+                        titleName = title,
                         activity = activity,
                         onToggleFullscreen = { fullscreen = !fullscreen; setImmersive(activity, fullscreen) },
                         fullscreen = fullscreen,
@@ -558,7 +566,8 @@ private fun Player(
     localPath: String? = null,
     onCache: ((Int, Long) -> Unit)? = null,
     caching: Boolean = false,
-    cacheMsg: String = ""
+    cacheMsg: String = "",
+    titleName: String = ""
 ) {
     val ctx = LocalContext.current
     // v0.4.4: 自定义缓冲策略——1.5s 快速开播 + 更大缓冲上限,减少高码率下的反复卡顿
@@ -585,9 +594,13 @@ private fun Player(
     var isPlaying by remember { mutableStateOf(true) }
     var posMs by remember { mutableStateOf(0L) }
     var durMs by remember { mutableStateOf(0L) }
-    var showControls by remember { mutableStateOf(false) }
+    // v0.6.0: 控制条默认显示,播放 3 秒后自动隐藏(PiliPlus 同款行为)
+    var showControls by remember { mutableStateOf(true) }
+    // 双击左右半屏快进/快退提示:-10 / +10 秒
+    var seekHint by remember { mutableStateOf<Pair<Int, Long>?>(null) }
     // v0.4.19: 缓存清晰度选择菜单
     var showCacheQuality by remember { mutableStateOf(false) }
+
 
     // v0.4.19插件系统:把当前播放器挂到 PlayerBridge,供插件 player.* 控制;退出时解绑
     DisposableEffect(exo, bvid, cid) {
@@ -1016,6 +1029,20 @@ private fun Player(
         }
     }
 
+
+    // v0.6.0: 播放中 3 秒无操作自动隐藏控制条(拖进度/菜单打开时不隐藏)
+    LaunchedEffect(showControls, isPlaying, scrubbing, showSpeedMenu, showQualityMenu,
+        showSubMenu, showCacheQuality, seekHint) {
+        if (showControls && isPlaying && !scrubbing && !showSpeedMenu &&
+            !showQualityMenu && !showSubMenu && !showCacheQuality && seekHint == null) {
+            delay(3000)
+            showControls = false
+        }
+    }
+    LaunchedEffect(seekHint) {
+        if (seekHint != null) { delay(700); seekHint = null }
+    }
+
     Box(modifier.background(Color.Black)) {
         if (url.isEmpty()) {
             Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
@@ -1176,7 +1203,25 @@ private fun Player(
                         onTap = {
                             showControls = !showControls
                         },
-                        onDoubleTap = { togglePlay() },
+                        onDoubleTap = { pos ->
+                            // v0.6.0: PiliPlus 同款——左 1/3 快退 10s,右 1/3 快进 10s,中间播放/暂停
+                            val w = size.width.toFloat()
+                            when {
+                                pos.x < w * 0.35f -> {
+                                    val t = (exo.currentPosition - 10_000L).coerceAtLeast(0L)
+                                    exo.seekTo(t); posMs = t
+                                    seekHint = -10 to t
+                                }
+                                pos.x > w * 0.65f -> {
+                                    val max = if (durMs > 0) durMs else exo.duration.coerceAtLeast(0L)
+                                    var t = exo.currentPosition + 10_000L
+                                    if (max > 0) t = t.coerceAtMost(max)
+                                    exo.seekTo(t); posMs = t
+                                    seekHint = 10 to t
+                                }
+                                else -> togglePlay()
+                            }
+                        },
                         onLongPress = {
                             longPressBoost = true
                             indicator = "倍速" to 200
@@ -1229,18 +1274,29 @@ private fun Player(
             }
         }
 
-        // v0.4.4: 全屏顶部控制栏——左上角退出全屏 + 屏幕锁定(仅全屏且控制条可见时显示)
-        if (fullscreen && showControls) {
-            Row(Modifier.align(Alignment.TopStart).padding(6.dp),
-                verticalAlignment = Alignment.CenterVertically) {
-                IconButton(onClick = onToggleFullscreen) {
-                    Icon(Icons.Filled.ArrowBack, contentDescription = "退出全屏",
-                        tint = Color.White, modifier = Modifier.size(26.dp))
-                }
-                IconButton(onClick = { toggleScreenLock() }) {
-                    Icon(if (screenLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
-                        contentDescription = if (screenLocked) "解除锁定" else "锁定屏幕",
-                        tint = Color.White, modifier = Modifier.size(22.dp))
+        // v0.6.0: 全屏顶部控制栏(PiliPlus 风格:渐变 + 返回 + 标题 + 锁屏)
+        AnimatedVisibility(
+            visible = fullscreen && showControls,
+            enter = slideInVertically(initialOffsetY = { -it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { -it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.TopCenter)
+        ) {
+            Box(Modifier.fillMaxWidth().background(
+                Brush.verticalGradient(listOf(Color(0xCC000000), Color.Transparent)))) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp, vertical = 4.dp),
+                    verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onToggleFullscreen) {
+                        Icon(Icons.Filled.ArrowBack, contentDescription = "退出全屏",
+                            tint = Color.White, modifier = Modifier.size(24.dp))
+                    }
+                    Text(titleName, color = Color.White, fontSize = 14.sp, maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.weight(1f).padding(horizontal = 4.dp))
+                    IconButton(onClick = { toggleScreenLock() }) {
+                        Icon(if (screenLocked) Icons.Filled.Lock else Icons.Filled.LockOpen,
+                            contentDescription = if (screenLocked) "解除锁定" else "锁定屏幕",
+                            tint = Color.White, modifier = Modifier.size(20.dp))
+                    }
                 }
             }
         }
@@ -1254,40 +1310,44 @@ private fun Player(
             }
         }
 
-        // 自定义控制条（还原 Media3 官方观感：底部渐变 + 时间分置 + 进度条居中）
-        if (showControls) {
+        // v0.6.0: 底部控制条(PiliPlus 风格:渐变 + 时间/进度同行 + 按钮行,播放中自动隐藏)
+        AnimatedVisibility(
+            visible = showControls,
+            enter = slideInVertically(initialOffsetY = { it }) + fadeIn(),
+            exit = slideOutVertically(targetOffsetY = { it }) + fadeOut(),
+            modifier = Modifier.align(Alignment.BottomCenter)
+        ) {
             val pct = if (durMs > 0) (if (scrubbing) scrubPos else posMs.toFloat() / durMs.toFloat()) else 0f
-            Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth()
+            Box(Modifier.fillMaxWidth()
                 .background(
-                    androidx.compose.ui.graphics.Brush.verticalGradient(
+                    Brush.verticalGradient(
                         colors = listOf(Color.Transparent, Color(0xCC000000), Color(0xE6000000))
                     )
                 )
             ) {
-                Column(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp)) {
-                    // 时间行：当前时间 左 / 总时长 右（官方样式）
+                Column(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 10.dp)) {
+                    // 时间 + 进度条 + 总时长 同一行(PiliPlus 布局)
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         Text(fmtTime((if (scrubbing) (scrubPos * durMs).toLong() else posMs) / 1000),
-                            color = Color.White, fontSize = 12.sp)
-                        Spacer(Modifier.weight(1f))
-                        Text(fmtTime(durMs / 1000), color = Color.White, fontSize = 12.sp)
+                            color = Color.White, fontSize = 11.sp)
+                        Spacer(Modifier.width(8.dp))
+                        SlimProgressBar(
+                            progress = pct,
+                            buffered = if (durMs > 0) (bufferedMs.toFloat() / durMs.toFloat()).coerceIn(0f, 1f) else 0f,
+                            onSeek = { v ->
+                                scrubbing = true
+                                scrubPos = v
+                                if (durMs > 0) exo.seekTo((v * durMs).toLong())
+                            },
+                            onSeekFinished = {
+                                if (durMs > 0) exo.seekTo((scrubPos * durMs).toLong())
+                                scrubbing = false
+                            },
+                            modifier = Modifier.weight(1f).height(28.dp)
+                        )
+                        Spacer(Modifier.width(8.dp))
+                        Text(fmtTime(durMs / 1000), color = Color.White.copy(alpha = 0.65f), fontSize = 11.sp)
                     }
-                    // 进度条：细线样式（非粗杠），点击/拖动指哪打哪，松手精确 seek
-                    // v0.3.1: 灰色缓冲进度 + 已看进度
-                    SlimProgressBar(
-                        progress = pct,
-                        buffered = if (durMs > 0) (bufferedMs.toFloat() / durMs.toFloat()).coerceIn(0f, 1f) else 0f,
-                        onSeek = { v ->
-                            scrubbing = true
-                            scrubPos = v
-                            if (durMs > 0) exo.seekTo((v * durMs).toLong())
-                        },
-                        onSeekFinished = {
-                            if (durMs > 0) exo.seekTo((scrubPos * durMs).toLong())
-                            scrubbing = false
-                        },
-                        modifier = Modifier.fillMaxWidth().height(28.dp)
-                    )
                     // 按钮行：播放/暂停 + 书签 + 倍速 + 画质 .. 全屏
                     Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
                         IconButton(onClick = { togglePlay() }) {

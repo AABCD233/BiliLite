@@ -159,15 +159,20 @@ fun SpaceScreen(
             val likes = upstat?.optLong("likes", 0L) ?: 0L
             if (likes > 0) profile = profile?.copy(likes = likes)
 
-            // 关注状态(未登录 code=-101 → 隐藏按钮)
-            val rel = withContext(Dispatchers.IO) {
-                runCatching { api.relation(midLong) }.getOrNull()
-            }
-            if (rel != null && rel.optInt("code", -1) == 0) {
-                val attr = rel.optJSONObject("data")?.optInt("attribute", 0) ?: 0
-                followState = if (attr == 2 || attr == 6) 2 else 1
+            // 关注状态:acc/info 有 is_followed 时直接用,避免多打一次接口
+            // (未登录 code=-101 → 隐藏按钮)
+            if (d != null && d.has("is_followed")) {
+                followState = if (d.optBoolean("is_followed", false)) 2 else 1
             } else {
-                followState = 0
+                val rel = withContext(Dispatchers.IO) {
+                    runCatching { api.relation(midLong) }.getOrNull()
+                }
+                if (rel != null && rel.optInt("code", -1) == 0) {
+                    val attr = rel.optJSONObject("data")?.optInt("attribute", 0) ?: 0
+                    followState = if (attr == 2 || attr == 6) 2 else 1
+                } else {
+                    followState = 0
+                }
             }
             if (profile == null) profileError = "资料加载失败"
         } catch (e: Exception) {
@@ -733,6 +738,7 @@ private fun parseDynamic(o: JSONObject?): SpaceDyn? {
     val type = major?.optString("type", "") ?: ""
     val images = ArrayList<String>()
     var bvid = ""; var title = ""; var cover = ""; var dur = ""
+    var opusText = ""
     when (type) {
         "MAJOR_TYPE_DRAW" -> {
             val arr = major?.optJSONObject("draw")?.optJSONArray("items")
@@ -750,6 +756,8 @@ private fun parseDynamic(o: JSONObject?): SpaceDyn? {
         }
         "MAJOR_TYPE_OPUS" -> {
             val opus = major?.optJSONObject("opus")
+            // 图文动态的正文在 opus.summary.text(不是 title),desc 通常为 null
+            opusText = opus?.optJSONObject("summary")?.optString("text", "") ?: ""
             val pics = opus?.optJSONArray("pics")
             if (pics != null) for (i in 0 until minOf(pics.length(), 9)) {
                 val src = pics.optJSONObject(i)?.optString("url", "") ?: ""
@@ -758,7 +766,7 @@ private fun parseDynamic(o: JSONObject?): SpaceDyn? {
             if (title.isEmpty()) title = opus?.optString("title", "") ?: ""
         }
     }
-    val text = desc.ifBlank { title }
+    val text = desc.ifBlank { opusText.ifBlank { title } }
     if (text.isBlank() && images.isEmpty() && bvid.isBlank()) return null
     return SpaceDyn(
         id = id.ifBlank { "${author?.optLong("pub_ts", 0L)}-${text.hashCode()}" },
